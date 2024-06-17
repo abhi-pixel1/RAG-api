@@ -5,3 +5,5 @@ sentence-transformers
 chromadb
 huggingface_hub
 langchain_huggingface
+pymongo
+python-dotenv
