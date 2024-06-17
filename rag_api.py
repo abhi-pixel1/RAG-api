@@ -1,3 +1,5 @@
+import os
+from dotenv import load_dotenv
 from langchain_community.document_loaders import TextLoader
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
@@ -6,17 +8,17 @@ from langchain_huggingface import HuggingFaceEndpoint
 from langchain_core.prompts import PromptTemplate
 # import chromadb
 from langchain.memory import VectorStoreRetrieverMemory
-from langchain.chains.question_answering import load_qa_chain
+# from langchain.chains.question_answering import load_qa_chain
 from fastapi import FastAPI, File, UploadFile
 import uvicorn
 from pymongo.mongo_client import MongoClient
 from pymongo.server_api import ServerApi
 from langchain_community.vectorstores import MongoDBAtlasVectorSearch
-from langchain.chains.combine_documents import create_stuff_documents_chain
-from langchain_core.runnables import RunnablePassthrough
+# from langchain.chains.combine_documents import create_stuff_documents_chain
+# from langchain_core.runnables import RunnablePassthrough
 
 
-
+load_dotenv()  # Load environment variables from .env file
 
 
 app = FastAPI()
@@ -28,7 +30,7 @@ print("API server starting")
 ################################################################################################
 
 # mongo atlas DB connection
-uri = "mongodb+srv://abhinav:Password123@cluster0.jlclhef.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0"
+uri = os.getenv("MONGO_URI")
 
 client = MongoClient(uri, server_api=ServerApi('1'))
 
@@ -47,12 +49,14 @@ ATLAS_VECTOR_SEARCH_INDEX_NAME_CH = "vector_index_ch"
 
 # Getting the model from huggingface
 repo_id = "mistralai/Mixtral-8x7B-Instruct-v0.1"
+huggingfacehub_api_token = os.getenv("HUGGINGFACEHUB_API_TOKEN")
+
 llm = HuggingFaceEndpoint(
     repo_id=repo_id,
     max_new_tokens=256, #256
     temperature=0.2, #0.2
     top_k=10,
-    huggingfacehub_api_token="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"
+    huggingfacehub_api_token=huggingfacehub_api_token
 )
 
 ################################################################################################
@@ -72,10 +76,6 @@ Human: {human_input}
 Chatbot:"""
 
 
-# prompt = PromptTemplate(
-#     input_variables=["chat_history", "human_input", "context"],
-#     template=template
-# )
 prompt = PromptTemplate.from_template(template)
 
 ################################################################################################
@@ -95,23 +95,12 @@ knowledge_base_lang = MongoDBAtlasVectorSearch.from_connection_string(
         index_name=ATLAS_VECTOR_SEARCH_INDEX_NAME_KB,
     )
 
-# Setting up memory for conversation history
+# Setting up retrivers and memory for conversation history
 knowledge_base_retriever = knowledge_base_lang.as_retriever(search_kwargs={"k": 1})
 chat_history_retriever = chat_history_lang.as_retriever(search_kwargs={"k": 1})
 memory = VectorStoreRetrieverMemory(retriever=chat_history_retriever, memory_key="chat_history", input_key="human_input")
 
-# Loading question answering chain with memory and prompt
-# chain = load_qa_chain(
-#     llm=llm, 
-#     chain_type="stuff", 
-#     memory=memory, 
-#     prompt=prompt
-# )
 
-# chain = (
-#     {"context": knowledge_base_retriever, "chat_history":chat_history_retriever, "human_input": RunnablePassthrough()}
-#     | prompt
-# )
 
 chain = ( prompt | llm )
 
@@ -160,32 +149,26 @@ async def create_upload_file(file: UploadFile):
 # It performs similarity search on the knowledge base using the provided human input.
 @app.post("/query/")
 def query(human_input: str ):
-    # Perform similarity search in the knowledge base using the input query
-    # context = knowledge_base_lang.similarity_search(human_input)
-    # chat_history = chat_history_lang.similarity_search(human_input)
-
-    # formatted_prompt = prompt.format(context=context, chat_history=chat_history, human_input=human_input)
 
     # Execute a processing chain on the search results and input query
-    # c = chain({"input_documents": docs, "human_input": human_input})
-    # c = chain.invoke({"context":context, "chat_history":chat_history, "human_input":human_input})
 
-    # Return the result of the processing chain
-
-
+    # Perform similarity search on the knowledge base using the provided human input.
     page_contents_kb = [doc.page_content for doc in knowledge_base_retriever.invoke(human_input)]
     page_contents_ch = [doc.page_content for doc in chat_history_retriever.invoke(human_input)]
 
 
+    # pass the context and history added query to the llm model to get the result
     c = chain.invoke({"context": page_contents_kb, "chat_history": page_contents_ch, "human_input": human_input})
 
-    print(prompt.format(context=page_contents_kb, chat_history=page_contents_ch, human_input=human_input))
-    print("-----------------------------------------------------------------")
-    print(c)
+    # print(prompt.format(context=page_contents_kb, chat_history=page_contents_ch, human_input=human_input))
+    # print("-----------------------------------------------------------------")
+    # print(c)
 
+    # Save the current human input and chatbot response to memory
     memory.save_context({"Human": human_input}, {"Chatbot": c})
 
-    return "kkk"
+    # Return the llm response
+    return c
 
 
 
@@ -193,12 +176,5 @@ def query(human_input: str ):
 
 
 
-
-
-
-
-
-
-
-
-uvicorn.run(app, host='127.0.0.1', port=8000)
+if __name__ == '__main__':
+    uvicorn.run(app, host='127.0.0.1', port=8000)
