@@ -7,3 +7,6 @@ huggingface_hub
 langchain_huggingface
 pymongo
 python-dotenv
+pypdf
+unstructured
+python-pptx
